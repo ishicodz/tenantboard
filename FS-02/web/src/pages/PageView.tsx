@@ -28,7 +28,12 @@ export function PageView() {
   });
   const session = useCollabSession(pageId!, user);
 
-  if (metaQ.isError) return <div className="center-msg">This page doesn't exist or you don't have access.</div>;
+  // Only a real 403/404 means "no access". A failed background refresh (server
+  // restarting, network blip) keeps the last good data so the editor stays open.
+  const status = (metaQ.error as { status?: number } | null)?.status;
+  if (metaQ.isError && (!metaQ.data || status === 403 || status === 404)) {
+    return <div className="center-msg">{status === 403 || status === 404 || !status ? "This page doesn't exist or you don't have access." : "Can't reach the server. Retrying…"}</div>;
+  }
   if (!metaQ.data || !session || !user) return <div className="center-msg muted">Loading…</div>;
   return <Loaded key={pageId} meta={metaQ.data} session={session} user={user} />;
 }
