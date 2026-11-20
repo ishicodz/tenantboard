@@ -1,5 +1,7 @@
 # TenantBoard
 
+**Demo video (90 s, captioned):** [docs/demo/FS-04-demo.mp4](docs/demo/FS-04-demo.mp4)
+
 A multi-tenant, Jira-like project management SaaS. Every company gets an isolated workspace with projects, drag-and-drop Kanban boards, sprints, custom workflows, comments, attachments, an audit log, outgoing webhooks, background reports, and Stripe subscription billing with plan limits.
 
 **Stack:** React 19 · TypeScript · Vite · dnd-kit · TanStack Query | Node 22 · Express 5 · Prisma 6 · PostgreSQL 16 · BullMQ + Redis · Stripe | Vitest · Supertest | Docker · GitHub Actions

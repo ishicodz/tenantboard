@@ -1,5 +1,7 @@
 # Inkwell: real-time collaborative workspace
 
+**Demo video (85 s, captioned, two browsers on two server instances side by side):** [docs/demo/FS-02-demo.mp4](docs/demo/FS-02-demo.mp4)
+
 Several people edit the same document at once, see each other's cursors, and never lose changes. Notion-style pages built on **Yjs CRDTs**, a **TipTap** rich-text editor, a permission-aware **WebSocket** sync server, and **Redis** so it scales across multiple server instances.
 
 **Stack:** React 19 · TypeScript · Vite · TipTap 3 · Yjs · y-websocket | Node 22 · Express 5 · Zod · Prisma 6 · PostgreSQL 16 · ws · Redis 7 | Vitest · Supertest | Docker · nginx · GitHub Actions
@@ -120,3 +122,4 @@ docker-compose.yml              db, redis, api1, api2, web (nginx)
 - Snapshots store full state; storing diffs would save space
 - A canvas (Figma-style) mode on the same Y.Doc infrastructure
 - Email invitations for people without accounts
+- Undo after a version restore reverts the content but not the title (the title is a separate `Y.Text` outside the editor's undo stack)
