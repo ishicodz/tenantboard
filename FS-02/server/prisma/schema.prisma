@@ -1,0 +1,127 @@
+// Collaborative workspace data model.
+//
+// Document content lives in Page.ydoc as a binary Yjs update (the CRDT state).
+// The WebSocket server keeps live docs in memory and flushes them here.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  OWNER
+  MEMBER
+}
+
+/// Access level on a single page. Ordered: VIEW < COMMENT < EDIT.
+enum PageRole {
+  VIEW
+  COMMENT
+  EDIT
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  memberships Membership[]
+  pagesOwned  Page[]           @relation("pageCreator")
+  pageShares  PagePermission[]
+  comments    Comment[]
+  snapshots   Snapshot[]
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  members Membership[]
+  pages   Page[]
+}
+
+model Membership {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Page {
+  id          String    @id @default(cuid())
+  workspaceId String
+  title       String    @default("Untitled")
+  icon        String?
+  /// Access every workspace member gets unless they have an explicit PagePermission.
+  memberRole  PageRole  @default(EDIT)
+  ydoc        Bytes?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("pageCreator", fields: [createdById], references: [id])
+
+  permissions PagePermission[]
+  comments    Comment[]
+  snapshots   Snapshot[]
+
+  @@index([workspaceId])
+}
+
+/// Explicit per-user override (can raise or lower access vs. memberRole).
+model PagePermission {
+  id     String   @id @default(cuid())
+  pageId String
+  userId String
+  role   PageRole
+  page   Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, userId])
+}
+
+model Comment {
+  id         String    @id @default(cuid())
+  pageId     String
+  authorId   String
+  parentId   String?
+  body       String
+  /// Text the comment was anchored to when it was created.
+  quote      String?
+  resolved   Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  page       Page      @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  author     User      @relation(fields: [authorId], references: [id])
+  parent     Comment?  @relation("thread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies    Comment[] @relation("thread")
+
+  @@index([pageId, createdAt])
+}
+
+model Snapshot {
+  id          String   @id @default(cuid())
+  pageId      String
+  label       String
+  /// Full Yjs state at the time of the snapshot.
+  state       Bytes
+  auto        Boolean  @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+  page        Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([pageId, createdAt])
+}
