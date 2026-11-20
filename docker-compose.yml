@@ -1,0 +1,88 @@
+# Full stack: Postgres, Redis, API, background worker, web (nginx).
+#   docker compose up --build
+#   docker compose run --rm seed      # optional demo data
+# App: http://localhost:8080   Login: demo@tenantboard.dev / password123
+
+x-api-env: &api-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://pm:pm@db:5432/pm?schema=public
+  REDIS_URL: redis://redis:6379
+  JOBS_MODE: bullmq
+  JWT_SECRET: ${JWT_SECRET:-local-docker-secret-change-me}
+  APP_URL: ${APP_URL:-http://localhost:8080}
+  CORS_ORIGIN: ${APP_URL:-http://localhost:8080}
+  UPLOAD_DIR: /app/uploads
+  STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+  STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
+  STRIPE_PRICE_BUSINESS: ${STRIPE_PRICE_BUSINESS:-}
+  ALLOW_DEV_BILLING: ${ALLOW_DEV_BILLING:-true}
+  WEBHOOK_ALLOW_PRIVATE: ${WEBHOOK_ALLOW_PRIVATE:-false}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pm
+      POSTGRES_PASSWORD: pm
+      POSTGRES_DB: pm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pm"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./server
+    environment: *api-env
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: ./server
+    command: ["node", "dist/worker.js"]
+    environment: *api-env
+    depends_on:
+      api: { condition: service_healthy }
+
+  web:
+    build: ./web
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      - "8080:80"
+
+  seed:
+    build:
+      context: ./server
+      target: build
+    command: ["npx", "tsx", "prisma/seed.ts"]
+    environment:
+      DATABASE_URL: postgresql://pm:pm@db:5432/pm?schema=public
+    depends_on:
+      api: { condition: service_healthy }
+    profiles: ["tools"]
+
+volumes:
+  pgdata:
+  uploads:

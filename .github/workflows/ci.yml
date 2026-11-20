@@ -1,0 +1,124 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+
+jobs:
+  server:
+    name: API · typecheck + tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pm
+          POSTGRES_PASSWORD: pm
+          POSTGRES_DB: pm_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pm" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: server
+    env:
+      TEST_DATABASE_URL: postgresql://pm:pm@localhost:5432/pm_test?schema=public
+      DATABASE_URL: postgresql://pm:pm@localhost:5432/pm_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - name: Coverage summary
+        if: always()
+        run: |
+          node -e "const s=require('./coverage/coverage-summary.json').total; console.log('| metric | % |\n|---|---|\n'+Object.entries(s).map(([k,v])=>'| '+k+' | '+v.pct+' |').join('\n'))" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-coverage
+          path: server/coverage
+
+  web:
+    name: Web · typecheck + tests + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Docker · build + smoke test (+ push on main)
+    needs: [server, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose smoke test
+        run: |
+          docker compose up -d --build --wait api web worker
+          curl -fsS http://localhost:8080/api/health
+          curl -fsS -o /dev/null http://localhost:8080/
+          docker compose logs api worker --tail 20
+          docker compose down -v
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push images
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          prefix=$(echo "$IMAGE_PREFIX" | tr '[:upper:]' '[:lower:]')
+          docker build -t "$prefix/api:${GITHUB_SHA::7}" -t "$prefix/api:latest" server
+          docker build -t "$prefix/web:${GITHUB_SHA::7}" -t "$prefix/web:latest" web
+          docker push --all-tags "$prefix/api"
+          docker push --all-tags "$prefix/web"
+
+  deploy:
+    name: Deploy
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      # Works with any host that exposes a deploy hook URL (Render, Railway, Coolify, ...).
+      # Add the hook URLs as repository secrets; missing hooks are skipped.
+      - name: Trigger deploy hooks
+        env:
+          API_HOOK: ${{ secrets.DEPLOY_HOOK_API }}
+          WORKER_HOOK: ${{ secrets.DEPLOY_HOOK_WORKER }}
+          WEB_HOOK: ${{ secrets.DEPLOY_HOOK_WEB }}
+        run: |
+          deployed=0
+          for hook in "$API_HOOK" "$WORKER_HOOK" "$WEB_HOOK"; do
+            if [ -n "$hook" ]; then curl -fsS -X POST "$hook" > /dev/null && deployed=$((deployed+1)); fi
+          done
+          echo "Triggered $deployed deploy hook(s)" | tee -a "$GITHUB_STEP_SUMMARY"
