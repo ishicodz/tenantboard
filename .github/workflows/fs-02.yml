@@ -1,0 +1,96 @@
+name: FS-02 CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths: ["FS-02/**", ".github/workflows/fs-02.yml"]
+  pull_request:
+    paths: ["FS-02/**", ".github/workflows/fs-02.yml"]
+
+concurrency:
+  group: fs02-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: API + collab server · typecheck, tests, load test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pm
+          POSTGRES_PASSWORD: pm
+          POSTGRES_DB: collab_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pm" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: FS-02/server
+    env:
+      TEST_DATABASE_URL: postgresql://pm:pm@localhost:5432/collab_test?schema=public
+      DATABASE_URL: postgresql://pm:pm@localhost:5432/collab_test?schema=public
+      TEST_REDIS_URL: redis://localhost:6379/1
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: FS-02/server/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - name: Load test (25 clients across 2 instances)
+        run: CLIENTS=25 EDITS=30 npm run loadtest | tee loadtest.txt
+      - name: Summary
+        if: always()
+        run: |
+          echo '### Coverage' >> "$GITHUB_STEP_SUMMARY"
+          node -e "const s=require('./coverage/coverage-summary.json').total; console.log('| metric | % |\n|---|---|\n'+Object.entries(s).map(([k,v])=>'| '+k+' | '+v.pct+' |').join('\n'))" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '### Load test' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"; sed -n '/^{/,/^}/p' loadtest.txt >> "$GITHUB_STEP_SUMMARY" || true; echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  web:
+    name: Web · typecheck, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FS-02/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: FS-02/web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Docker · 2 API instances behind nginx, smoke test
+    needs: [server, web]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FS-02
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose up
+        run: docker compose up -d --build --wait api1 api2 web
+      - name: Smoke test
+        run: |
+          curl -fsS http://localhost:8081/api/health
+          curl -fsS -o /dev/null http://localhost:8081/
+          # both instances answer behind the load balancer
+          for i in 1 2 3 4 5 6; do curl -fsS http://localhost:8081/api/health | grep -o '"instance":"[a-z0-9]*"'; done | sort -u
+      - if: always()
+        run: docker compose logs api1 api2 --tail 30 && docker compose down -v

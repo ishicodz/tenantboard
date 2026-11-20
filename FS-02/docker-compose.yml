@@ -1,0 +1,88 @@
+# Postgres, Redis, TWO API instances (REST + WebSockets) and nginx load-balancing between them.
+#   docker compose up --build -d
+#   docker compose run --rm seed     # demo users: alice/bob/carol/dave@inkwell.dev, password123
+# App: http://localhost:8081
+
+x-api: &api
+  build: ./server
+  environment:
+    NODE_ENV: production
+    DATABASE_URL: postgresql://pm:pm@db:5432/collab?schema=public
+    REDIS_URL: redis://redis:6379
+    JWT_SECRET: ${JWT_SECRET:-local-docker-secret-change-me}
+    CORS_ORIGIN: ${APP_URL:-http://localhost:8081}
+  depends_on:
+    db: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://localhost:4100/api/health || exit 1"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pm
+      POSTGRES_PASSWORD: pm
+      POSTGRES_DB: collab
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pm"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api1:
+    <<: *api
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://pm:pm@db:5432/collab?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-local-docker-secret-change-me}
+      CORS_ORIGIN: ${APP_URL:-http://localhost:8081}
+      INSTANCE_NAME: api1
+
+  api2:
+    <<: *api
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://pm:pm@db:5432/collab?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-local-docker-secret-change-me}
+      CORS_ORIGIN: ${APP_URL:-http://localhost:8081}
+      INSTANCE_NAME: api2
+    depends_on:
+      api1: { condition: service_healthy } # let api1 run migrations first
+
+  web:
+    build: ./web
+    depends_on:
+      api1: { condition: service_healthy }
+      api2: { condition: service_healthy }
+    ports:
+      - "8081:80"
+
+  seed:
+    build:
+      context: ./server
+      target: build
+    command: ["npx", "tsx", "prisma/seed.ts"]
+    environment:
+      DATABASE_URL: postgresql://pm:pm@db:5432/collab?schema=public
+    depends_on:
+      api1: { condition: service_healthy }
+    profiles: ["tools"]
+
+volumes:
+  pgdata:
