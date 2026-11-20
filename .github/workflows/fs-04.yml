@@ -1,9 +1,11 @@
-name: CI/CD
+name: FS-04 CI/CD
 
 on:
   push:
     branches: [main]
+    paths: ["FS-04/**", ".github/workflows/fs-04.yml"]
   pull_request:
+    paths: ["FS-04/**", ".github/workflows/fs-04.yml"]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -11,7 +13,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+  IMAGE_PREFIX: ghcr.io/${{ github.repository }}/fs-04
 
 jobs:
   server:
@@ -29,7 +31,7 @@ jobs:
           --health-cmd "pg_isready -U pm" --health-interval 5s --health-timeout 5s --health-retries 10
     defaults:
       run:
-        working-directory: server
+        working-directory: FS-04/server
     env:
       TEST_DATABASE_URL: postgresql://pm:pm@localhost:5432/pm_test?schema=public
       DATABASE_URL: postgresql://pm:pm@localhost:5432/pm_test?schema=public
@@ -39,7 +41,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: server/package-lock.json
+          cache-dependency-path: FS-04/server/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:coverage
@@ -51,21 +53,21 @@ jobs:
         if: always()
         with:
           name: server-coverage
-          path: server/coverage
+          path: FS-04/server/coverage
 
   web:
     name: Web · typecheck + tests + build
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: web
+        working-directory: FS-04/web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: FS-04/web/package-lock.json
       - run: npm ci
       - run: npm test
       - run: npm run build
@@ -77,6 +79,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    defaults:
+      run:
+        working-directory: FS-04
     steps:
       - uses: actions/checkout@v4
       - name: Compose smoke test
