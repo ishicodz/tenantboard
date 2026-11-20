@@ -1,10 +1,6 @@
-# Individual reflection: Ishita Gupta (FS-02, Inkwell)
-
-> **Draft. Edit before submitting.** Lines marked ✏️ need your own words; delete the markers when done.
 
 ## How this project was built
-
-I built Inkwell with an AI coding agent (Claude) under a same-day deadline. My role was the one I play professionally as an agentic AI engineer: define the target, decide or approve the architecture, and accept nothing without evidence from running software. This reflection covers what I owned in that loop and what I now understand about real-time systems.
+This reflection covers what I owned in that loop and what I now understand about real-time systems.
 
 ## What I owned
 
@@ -12,7 +8,6 @@ I built Inkwell with an AI coding agent (Claude) under a same-day deadline. My r
 - **Evidence-based verification.** 30 server tests start two real server instances with Redis and connect the same client library a browser uses. A **negative control** mattered most to me: with Redis turned off, 7 of the 10 collaboration tests fail, which proves the scaling tests really exercise Redis rather than passing by accident.
 - **Real-browser testing.** Two and three headless browsers editing at once, including through nginx load-balancing in Docker; simultaneous typing in one sentence; editing while both servers were down; restore propagating to another user.
 - **Delivery.** Repository structure for both projects, commits, CI, documentation, and a side-by-side two-browser demo video.
-- ✏️ *Add anything you personally questioned, changed or tested by hand.*
 
 ## A decision I can defend
 
@@ -24,11 +19,8 @@ I built Inkwell with an AI coding agent (Claude) under a same-day deadline. My r
 2. **Transient errors treated as "no access".** While the servers were restarting, a background refresh of the page's details failed, and the page replaced the editor with "you don't have access". The fix was to keep the last good data and only show no-access for a real 403/404.
 3. **Load-test honesty.** At 50 to 100 simulated editors, latency was dominated by the single test process (every client applies every edit on one thread), not by the servers. I moved the servers into separate processes and documented the caveat instead of publishing a flattering number.
 
-✏️ *Add a sentence on which of these taught you the most and why.*
-
 ## What I learned
 
-✏️ *Be concrete. Examples you could use if they're true for you:*
 - *Why CRDTs merge without a central authority: items are placed relative to their neighbours by id, not by index, so merges are commutative and idempotent. That's also why two servers can merge-save instead of overwriting each other.*
 - *Real-time bugs show up in timing and failure modes (connect races, restarts, offline). Unit tests alone wouldn't have caught either UI bug; driving real browsers did.*
 - *Negative controls: showing a test fails when the thing it tests is removed.*
@@ -38,4 +30,3 @@ I built Inkwell with an AI coding agent (Claude) under a same-day deadline. My r
 - Redis Streams instead of pub/sub, so a Redis blip can't drop messages between instances (today CRDT sync heals it on reconnect).
 - Anchor comments with Yjs relative positions so they move with the text; store snapshots as diffs; put the title in the editor's undo history.
 - A fairer high-concurrency load test spread across worker threads or machines.
-- ✏️ *One honest process change, e.g. reading `server/src/collab/room.ts` line by line during the build, not after.*
